@@ -26,15 +26,22 @@
 
 // The <unistd.h> header is your gateway to the OS's process management facilities.
 #include <unistd.h>
+#include <signal.h>
 
 #include "parse.h"
 
 static void print_cmd(Command *cmd);
 static void print_pgm(Pgm *p);
 void stripwhite(char *);
+void init_signals();
+
+void handle_sigint();
 
 int main(void)
 {
+  // Setup signal handlers
+  init_signals();
+
   for (;;)
   {
     char *line;
@@ -63,8 +70,28 @@ int main(void)
     // Clear memory
     free(line);
   }
-
   return 0;
+}
+
+/*
+ * Initialize all signals with custom handlers
+ */
+void init_signals()
+{
+  if(signal(SIGINT, handle_sigint) == SIG_ERR)
+  {
+    printf("Unable to initialize SIGINT handler");
+  }
+}
+
+/* 
+ * Ctrl+c should send a SIGINT signal to the current process
+ * and kill foreground child processes.
+ */
+void handle_sigint()
+{
+  kill(getpid(), SIGINT);
+  _exit(EXIT_SUCCESS);
 }
 
 /*
