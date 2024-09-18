@@ -43,6 +43,9 @@ static void handle_sigint();
 static void shell_exit();
 
 static int handle_command(Command* cmd);
+int cd_handler(Command* cmd);
+void exit_handler(Command* cmd);
+char* get_path(char* cwd);
 void handle_child();
 void do_nothing();
 
@@ -58,13 +61,17 @@ int main(void)
   // Ctrl+c should kill all processes in pgid except pid
   setpgid(pid, pid);
 
+  
+
   pState.foregroundChild = 0;
   pState.shellPid = pid;
+  char cwd[1024];
 
   for (;;)
   {
     char *line;
-    line = readline("> ");
+    char* start = get_path(cwd);
+    line = readline(start);
 
     if(line == NULL){
       printf("Detected EOF\n");
@@ -82,8 +89,14 @@ int main(void)
       Command cmd;
       if (parse(line, &cmd) == 1)
       {
+        exit_handler(&cmd);
+        //print_cmd(&cmd);
         // If a foreground process is started, it should be terminated on SIGINT
-        int retCode = handle_command(&cmd);
+        if(cd_handler(&cmd) == 0)
+        {
+          printf("Handle command\n");
+          int retCode = handle_command(&cmd);
+        }
       }
       else
       {
@@ -104,15 +117,65 @@ void init_signals()
 {
   if(signal(SIGINT, handle_sigint) == SIG_ERR)
   {
-    printf("Unable to initialize SIGINT handler");
+    printf("Unable to initialize SIGINT handler\n");
   }
   if(signal(SIGCHLD, handle_child) == SIG_ERR)
   {
-    printf("Unable to initialize SIGCHLD handler");
+    printf("Unable to initialize SIGCHLD handler\n");
   }
   if(signal(SIGHUP, SIG_IGN) == SIG_ERR)
   {
-    printf("Couldn't ignore SIGHUP signal");
+    printf("Couldn't ignore SIGHUP signal\n");
+  }
+}
+
+char* get_path(char* cwd)
+{
+  char* end = cwd;
+  getcwd(cwd, 1024 * sizeof(char));
+  while(*end++ != 0);
+  end--;
+  *end++ = '>';
+  *end++ = ' ';
+  *end++ = 0;
+  int numSlashes = 0;
+  while(numSlashes < 2 && end > cwd)
+  {
+    
+    if(*end-- == '/')
+    {
+      numSlashes++;
+    }
+  }
+  *end = '$';
+  //printf(end);
+  return end;
+}
+
+/*
+ * If cd command -> execute cd and return 1
+ * else return 0
+ */
+int cd_handler(Command* cmd)
+{
+  if(strcmp(cmd->pgm->pgmlist[0], "cd") == 0)
+  {
+    int retVal = chdir(cmd->pgm->pgmlist[1]);
+    if(retVal == -1)
+    {
+      printf("cd: No such file or directory\n");
+    }
+    return 1;
+  }
+  return 0;
+}
+
+void exit_handler(Command* cmd)
+{
+  if(strcmp(cmd->pgm->pgmlist[0], "exit") == 0)
+  {
+    killpg(0, SIGHUP);
+    exit(0);
   }
 }
 
