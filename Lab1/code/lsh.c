@@ -17,6 +17,7 @@
  * All the best!
  */
 #include <assert.h>
+#include <errno.h>
 #include <ctype.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -27,7 +28,8 @@
 // The <unistd.h> header is your gateway to the OS's process management facilities.
 #include <unistd.h>
 #include <signal.h>
-#include <sys/wait.h> 
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #include "parse.h"
 #include "ProgramState.h"
@@ -45,6 +47,7 @@ static void shell_exit();
 static int handle_command(Command* cmd);
 int cd_handler(Command* cmd);
 void exit_handler(Command* cmd);
+int get_numberOfCommands(Command* cmd);
 char* get_path(char* cwd);
 void handle_child();
 void do_nothing();
@@ -90,11 +93,11 @@ int main(void)
       if (parse(line, &cmd) == 1)
       {
         exit_handler(&cmd);
-        //print_cmd(&cmd);
+        print_cmd(&cmd);
         // If a foreground process is started, it should be terminated on SIGINT
         if(cd_handler(&cmd) == 0)
         {
-          printf("Handle command\n");
+          //print_cmd(&cmd);
           int retCode = handle_command(&cmd);
         }
       }
@@ -186,6 +189,36 @@ void exit_handler(Command* cmd)
 */
 int handle_command(Command* cmd)
 {
+  /*
+  size_t numCommands = get_numberOfCommands(cmd);
+  if(numCommands > 1)
+  {
+    // Do some pipeing
+    int pipesfd[numCommands - 1][2];
+    for(size_t i = 0; i < numCommands; i++){
+      int success = pipe(pipesfd[i]);
+      if(success == -1)
+      {
+        printf("Couldn't create pipe\n");
+        return -1;
+      }
+      pid_t child = fork();
+
+      if(child == 0)
+      {
+        close(pipesfd[i][1]);
+
+      }
+      else {
+        close(pipesfd[i][0]);
+        write(pipesfd[i][1]);
+        
+      }
+
+    }
+  }*/
+  
+  printf("Number of commands: %d\n", get_numberOfCommands(cmd));
   pid_t pid = fork();
   //printf("Pid after fork %d\n", pid);
   if(pid == -1)
@@ -200,6 +233,12 @@ int handle_command(Command* cmd)
     signal(SIGCHLD, SIG_IGN);
     // All child processes can be gracefully terminated when the shell exits
     signal(SIGHUP, shell_exit);
+    if(*cmd->rstdout != 0){
+      int fd = open(cmd->rstdout, O_RDWR | O_CREAT);
+      dup2(fd, STDOUT_FILENO);
+      close(fd);
+    }
+
     int retCode = execvp(cmd->pgm->pgmlist[0], cmd->pgm->pgmlist);
     exit(retCode);
   }
@@ -211,6 +250,17 @@ int handle_command(Command* cmd)
     waitpid(pid, NULL, 0);
   }
   return 0;
+}
+
+int get_numberOfCommands(Command* cmd)
+{
+  int numCommands = 1;
+  struct c* next = cmd->pgm->next;
+  while(next != NULL){
+    numCommands++;
+    next = next->next;
+  }
+  return numCommands;
 }
 
 void handle_child()
