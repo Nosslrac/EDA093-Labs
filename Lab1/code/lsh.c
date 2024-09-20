@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 
 #include "parse.h"
@@ -44,7 +45,8 @@ static void handle_sigint();
 //When shell exit -> background processes exit
 static void shell_exit();
 
-static int handle_command(Command* cmd);
+static int handle_command(Pgm* pgm);
+int handle_piping(Command* cmd);
 int cd_handler(Command* cmd);
 void exit_handler(Command* cmd);
 int get_numberOfCommands(Command* cmd);
@@ -63,8 +65,6 @@ int main(void)
   // All subsequent child processes will inherit this pgid -> 
   // Ctrl+c should kill all processes in pgid except pid
   setpgid(pid, pid);
-
-  
 
   pState.foregroundChild = 0;
   pState.shellPid = pid;
@@ -93,12 +93,12 @@ int main(void)
       if (parse(line, &cmd) == 1)
       {
         exit_handler(&cmd);
-        print_cmd(&cmd);
+        //print_cmd(&cmd);
         // If a foreground process is started, it should be terminated on SIGINT
         if(cd_handler(&cmd) == 0)
         {
           //print_cmd(&cmd);
-          int retCode = handle_command(&cmd);
+          int retCode = handle_piping(&cmd);
         }
       }
       else
@@ -187,69 +187,108 @@ void exit_handler(Command* cmd)
  * Returns a foreground process pid if started,
  * if a background process is started 0 is returned
 */
-int handle_command(Command* cmd)
+int handle_command(Pgm* pgm)
+{
+  // Remove signal handlers for child processes -> handled by shell process
+  signal(SIGINT, SIG_IGN);
+  signal(SIGCHLD, SIG_IGN);
+  // All child processes can be gracefully terminated when the shell exits
+  signal(SIGHUP, shell_exit);
+  int retCode = execvp(pgm->pgmlist[0], pgm->pgmlist);
+  exit(retCode);
+}
+
+
+int handle_piping(Command* cmd)
 {
   /*
   size_t numCommands = get_numberOfCommands(cmd);
-  if(numCommands > 1)
-  {
-    // Do some pipeing
-    int pipesfd[numCommands - 1][2];
-    for(size_t i = 0; i < numCommands; i++){
-      int success = pipe(pipesfd[i]);
-      if(success == -1)
-      {
-        printf("Couldn't create pipe\n");
-        return -1;
-      }
-      pid_t child = fork();
-
-      if(child == 0)
-      {
-        close(pipesfd[i][1]);
-
-      }
-      else {
-        close(pipesfd[i][0]);
-        write(pipesfd[i][1]);
-        
-      }
-
-    }
-  }*/
   
   printf("Number of commands: %d\n", get_numberOfCommands(cmd));
-  pid_t pid = fork();
-  //printf("Pid after fork %d\n", pid);
-  if(pid == -1)
-  {
-    printf("Fork failed");
-    return -1;
+  pid_t shellFork = fork();
+  
+  if(shellFork != 0){
+    pState.foregroundChild = shellFork;
+    waitpid(shellFork, NULL, 0);
+    return 0;
   }
-  if(pid == 0)
-  {
-    // Remove signal handlers for child processes -> handled by shell process
-    signal(SIGINT, SIG_IGN);
-    signal(SIGCHLD, SIG_IGN);
-    // All child processes can be gracefully terminated when the shell exits
-    signal(SIGHUP, shell_exit);
-    if(*cmd->rstdout != 0){
-      int fd = open(cmd->rstdout, O_RDWR | O_CREAT);
-      dup2(fd, STDOUT_FILENO);
-      close(fd);
+  if(numCommands == 1){
+    handle_command(cmd->pgm);
+  }
+  // Do some pipeing
+  Pgm* command = cmd->pgm;
+  for(size_t i = 0; i <  numCommands - 1; i++){
+    int pipefd[2];
+    int success = pipe(pipefd);
+    if(success == -1)
+    {
+      printf("Couldn't create pipe\n");
+      return -1;
     }
-
-    int retCode = execvp(cmd->pgm->pgmlist[0], cmd->pgm->pgmlist);
-    exit(retCode);
-  }
-
-  // Process running in foreground -> should wait for it to finish
-  if(cmd->background == 0)
-  {
-    pState.foregroundChild = pid;
-    waitpid(pid, NULL, 0);
+    pid_t processFork = fork();
+    if(processFork == 0)
+    {
+      close(pipefd[1]);
+      dup2(pipefd[0], STDOUT_FILENO);
+      close(pipefd[0]);
+      pid_t pid = fork();
+      if(pid == 0)
+      {
+        handle_command(command);
+      }
+      command = command->next;
+    }
+    else
+    {
+      // Parent might output to file (last command)
+      if(cmd->rstdout){
+        int fd = open(cmd->rstdout, O_RDWR | O_CREAT, S_IRWXU);
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+      }
+      close(pipefd[0]);
+      dup2(pipefd[1], STDIN_FILENO);
+      close(pipefd[1]);
+      pState.foregroundChild = processFork;
+      waitpid(processFork, NULL, 0);
+      break;
+    }
   }
   return 0;
+  */
+  // Fork for shell process
+  pid_t process = fork();
+  if(process == 0)
+  {
+    int pipefd[2];
+    int success = pipe(pipefd);
+    if(success == -1)
+    {
+      printf("Couldn't create pipe\n");
+      return -1;
+    }
+    printf("Pipes: %d, %d\n", pipefd[0], pipefd[1]);
+    pid_t child = fork();
+    if(child == 0)
+    {
+      close(pipefd[0]);
+      dup2(pipefd[1], STDOUT_FILENO);
+      handle_command(cmd->pgm->next);
+    }
+    else
+    {
+      close(pipefd[1]);
+      dup2(pipefd[0], STDIN_FILENO);
+      handle_command(cmd->pgm);
+    } 
+  }
+  else if(cmd->background == 0)
+  {
+    pState.foregroundChild = process;
+    waitpid(process, NULL, 0);
+  }
+
+  
 }
 
 int get_numberOfCommands(Command* cmd)
