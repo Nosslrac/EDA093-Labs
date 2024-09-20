@@ -1,3 +1,5 @@
+#ifndef PARSE_INC
+#define PARSE_INC
 typedef struct c
 {
   char **pgmlist;
@@ -18,3 +20,4 @@ extern int parse(char *, Command *);
 extern int nexttoken(char *, char **);
 extern int acmd(char *, Pgm **);
 extern int isidentifier(char *);
+#endif
