@@ -2,6 +2,7 @@
 #define LSH_INC
 //Libs
 #include <stdio.h>
+#include <time.h>
 
 #include "parse.h"
 
@@ -20,8 +21,15 @@ int execute_command(Pgm* pgm);
 int execute_command_background(Pgm* pgm);
 int handle_command(Command* cmd);
 int check_command(Pgm* pgm);
-int fork_and_pipe(Pgm* pgm, size_t forks, int background);
 int handle_cd(Command* cmd);
+
+// Fork form shell
+int setup_command_chain(Command* cmd);
+void childProc_setSig(Command* cmd);
+void setInputOutput(Command* cmd, int index, int size);
+int wait_children(const pid_t* children, int size);
+
+
 size_t get_numberOfCommands(Command* cmd);
 char* get_path(char* cwd);
 #endif
