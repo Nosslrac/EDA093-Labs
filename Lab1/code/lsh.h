@@ -17,9 +17,11 @@ void handle_child();
 void exit_handler(Command* cmd);
 
 int execute_command(Pgm* pgm);
+int execute_command_background(Pgm* pgm);
 int handle_command(Command* cmd);
-int forkAndPipe(Pgm* pgm, size_t forks, int* pipe);
+int check_command(Pgm* pgm);
+int fork_and_pipe(Pgm* pgm, size_t forks, int background);
 int handle_cd(Command* cmd);
-int get_numberOfCommands(Command* cmd);
+size_t get_numberOfCommands(Command* cmd);
 char* get_path(char* cwd);
 #endif

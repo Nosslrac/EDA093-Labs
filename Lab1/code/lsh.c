@@ -17,6 +17,7 @@
  * All the best!
  */
 #include <assert.h>
+#include <errno.h>
 #include <ctype.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -36,12 +37,9 @@
 #include "parse.h"
 #include "ProgramState.h"
 
-//static void print_cmd(Command *cmd);
-//static void print_pgm(Pgm *p);
+static void print_cmd(Command *cmd);
+static void print_pgm(Pgm *p);
 
-
-//Only used in shell (parent) process
-volatile ProgramState pState = {0, 0};
 
 int main(void)
 {
@@ -52,8 +50,6 @@ int main(void)
   // Ctrl+c should kill all processes in pgid except pid
   setpgid(pid, pid);
 
-  pState.foregroundChild = 0;
-  pState.shellPid = pid;
   char cwd[1024];
 
   for (;;)
@@ -107,14 +103,18 @@ int main(void)
  */
 void init_signals()
 {
+  // Ctrl+c should not terminate shell
   if(signal(SIGINT, handle_sigint) == SIG_ERR)
   {
     printf("Unable to initialize SIGINT handler\n");
   }
+  // On child change wait for them and kill
   if(signal(SIGCHLD, handle_child) == SIG_ERR)
   {
     printf("Unable to initialize SIGCHLD handler\n");
   }
+  // Used to kill child processes when terminal exits, 
+  // but should not kill the terminal itself i.e terminal should exit gracefully
   if(signal(SIGHUP, SIG_IGN) == SIG_ERR)
   {
     printf("Couldn't ignore SIGHUP signal\n");
@@ -171,18 +171,26 @@ int handle_cd(Command* cmd)
 int execute_command(Pgm* pgm)
 {
   // Remove signal handlers for child processes -> handled by shell process
-  signal(SIGINT, SIG_IGN);
   signal(SIGCHLD, SIG_IGN);
   // All child processes can be gracefully terminated when the shell exits
   signal(SIGHUP, child_exit);
-  int retCode = execvp(pgm->pgmlist[0], pgm->pgmlist);
-  exit(retCode);
+  int status = execvp(pgm->pgmlist[0], pgm->pgmlist);
+  exit(status);
 }
 
 
 
 int handle_command(Command* cmd)
 {
+  Pgm* pgm = cmd->pgm;
+  while(pgm != NULL){
+    if(!check_command(pgm)){
+      printf("lsh: %s: command not found\n", pgm->pgmlist[0]);
+      fflush(stdout);
+    }
+    pgm = pgm->next;
+  }
+  
   // Terminal process fork
   pid_t process = fork();
 
@@ -192,7 +200,7 @@ int handle_command(Command* cmd)
     if(cmd->rstdout)
     {
       //Redirect output to file
-      int fileOut = open(cmd->rstdout, O_RDWR | O_CREAT, S_IRWXU);
+      int fileOut = open(cmd->rstdout, O_WRONLY | O_CREAT, S_IRWXU);
       dup2(fileOut, STDOUT_FILENO);
       close(fileOut);
     }
@@ -204,25 +212,23 @@ int handle_command(Command* cmd)
       close(fileIn);
     }
     size_t numCommands = get_numberOfCommands(cmd);
-    forkAndPipe(cmd->pgm, numCommands - 1, NULL);
+    return fork_and_pipe(cmd->pgm, numCommands - 1, cmd->background);
   }
-  else if(cmd->background == 0) 
+  if(cmd->background == 0) 
   {
     //Shell process wait for forked child processes if it's not a background task
-    pState.foregroundChild = process;
     waitpid(process, NULL, 0);
   }
   return 0;
 }
 
-int forkAndPipe(Pgm* pgm, size_t forks, int* prevpipe)
+int fork_and_pipe(Pgm* pgm, size_t forks, int background)
 {
-  if(prevpipe != NULL)
-  {
-    //Child process should redirect stdout to pipe write end
-    close(prevpipe[0]); //Close read end
-    dup2(prevpipe[1], STDOUT_FILENO); //Redir stdout to write end of pipe
-    close(prevpipe[1]); // Close old fd
+  if(background){
+    signal(SIGINT, SIG_IGN);
+  }
+  else {
+    signal(SIGINT, SIG_DFL);
   }
   if(forks == 0){
     //Recursion base case
@@ -246,8 +252,11 @@ int forkAndPipe(Pgm* pgm, size_t forks, int* prevpipe)
 
   if(child == 0)
   {
-    //Child process will continue forking
-    return forkAndPipe(pgm->next, forks-1, pipefd);
+    //Child process will continue forking and connect to write end of pipe
+    close(pipefd[0]); //Close read end
+    dup2(pipefd[1], STDOUT_FILENO); //Redir stdout to write end of pipe
+    close(pipefd[1]); // Close old fd
+    return fork_and_pipe(pgm->next, forks-1, background);
   }
   //Parent process - should redirect sdtin to read end of pipe.
   close(pipefd[1]);
@@ -257,7 +266,7 @@ int forkAndPipe(Pgm* pgm, size_t forks, int* prevpipe)
 }
 
 
-int get_numberOfCommands(Command* cmd)
+size_t get_numberOfCommands(Command* cmd)
 {
   int numCommands = 1;
   struct c* next = cmd->pgm->next;
@@ -269,6 +278,32 @@ int get_numberOfCommands(Command* cmd)
 }
 
 
+int check_command(Pgm* pgm)
+{
+  //print_cmd(cmd);
+  char* dupEnv = strdup(getenv("PATH"));
+  char* startSearch = dupEnv;
+  char* colon = NULL;
+  struct stat buf;
+  int found = 0;
+  char file[100];
+  do{
+    colon = strchr(startSearch, ':');
+    if(colon != NULL){
+      *colon = 0; //End string at colon
+    }
+    snprintf(file, 100, "%s/%s", startSearch, pgm->pgmlist[0]);
+   
+    stat(file, &buf);
+    found |= S_ISREG(buf.st_mode);
+    startSearch = colon + 1;
+  } while(colon != NULL);
+
+  free(dupEnv);
+  return found;
+}
+
+
 /*
  * If a child process changes its state it's handled here
  */
@@ -277,8 +312,7 @@ void handle_child()
   //Kills background processes when they finish
   pid_t child = 0;
   int status = 0;
-  while((child = waitpid(0, &status, WNOHANG)) > 0 && child != pState.foregroundChild){
-    assert(child != pState.foregroundChild);
+  while((child = waitpid(0, &status, WNOHANG)) > 0){
     // Should we do something with exit status of child process?
     kill(child, SIGKILL);
   }
@@ -299,6 +333,8 @@ void exit_handler(Command* cmd)
  */
 void handle_sigint()
 {
+  //printf("\n");
+  /*
   if(pState.foregroundChild > 0){
     pid_t deadChild = waitpid(pState.foregroundChild, NULL, WNOHANG);
     if(deadChild == -1){
@@ -308,6 +344,7 @@ void handle_sigint()
     kill(pState.foregroundChild, SIGKILL);
     pState.foregroundChild = 0;
   }
+  */
 }
 
 /*
@@ -323,7 +360,7 @@ void child_exit()
  *
  * Helper function, no need to change. Might be useful to study as inspiration.
  */
- /*
+ 
 static void print_cmd(Command *cmd_list)
 {
   printf("------------------------------\n");
@@ -335,13 +372,13 @@ static void print_cmd(Command *cmd_list)
   print_pgm(cmd_list->pgm);
   printf("------------------------------\n");
 }
- */
+
 
 /* Print a (linked) list of Pgm:s.
  *
  * Helper function, no need to change. Might be useful to study as inpsiration.
  */
- /*
+
 static void print_pgm(Pgm *p)
 {
   if (p == NULL)
@@ -364,7 +401,7 @@ static void print_pgm(Pgm *p)
     printf("]\n");
   }
 }
- */
+
 
 
 /* Strip whitespace from the start and end of a string.

@@ -2,6 +2,7 @@ from datetime import datetime
 from os import mkdir, setsid, killpg, getpgid
 from pathlib import Path
 from signal import SIGINT
+from socket import gethostname
 from subprocess import run, PIPE, Popen, TimeoutExpired
 from tempfile import gettempdir
 from time import sleep, time
@@ -225,15 +226,16 @@ class TestLsh(unittest.TestCase):
 
     def test_for_zombies(self):
         """
-        Run "echo hello" and then "echo world" and check for zombie processes.
+        Run two consecutive commands and check for their output and for zombie processes.
         """
         self.start_lsh()
-        self.run_cmd("echo $((3+4))")
-        self.run_cmd("echo $((5+4))")
+        self.run_cmd("hostname")
+        self.run_cmd("date")
         self.check_for_zombies()
         out = self.exit_with_eof()
-        self.assertIn("7", out)
-        self.assertIn("9", out)
+        self.assertIn(gethostname(), out, msg="Did not find expected output from the first command")
+        current_year = str(datetime.now().year)
+        self.assertIn(current_year, out, msg="Did not find expected output from the first command")
 
     def test_echo_rev(self):
         """
