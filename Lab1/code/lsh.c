@@ -212,7 +212,16 @@ int handle_command(Command* cmd)
       close(fileIn);
     }
     size_t numCommands = get_numberOfCommands(cmd);
-    return fork_and_pipe(cmd->pgm, numCommands - 1, cmd->background);
+
+    pid_t waitProcessFork = fork();
+    if(waitProcessFork == 0){
+      return fork_and_pipe(cmd->pgm, numCommands - 1, cmd->background);
+    }
+    else{
+      waitpid(waitProcessFork, NULL, 0);
+      exit(0);
+    }
+    //return fork_and_pipe(cmd->pgm, numCommands - 1, cmd->background);
   }
   if(cmd->background == 0) 
   {
@@ -258,11 +267,15 @@ int fork_and_pipe(Pgm* pgm, size_t forks, int background)
     close(pipefd[1]); // Close old fd
     return fork_and_pipe(pgm->next, forks-1, background);
   }
-  //Parent process - should redirect sdtin to read end of pipe.
-  close(pipefd[1]);
-  dup2(pipefd[0], STDIN_FILENO);
-  close(pipefd[0]);
-  return execute_command(pgm);
+  else{
+    //Parent process - should redirect sdtin to read end of pipe.
+    close(pipefd[1]);
+    dup2(pipefd[0], STDIN_FILENO);
+    close(pipefd[0]);
+    waitpid(child, NULL, 0);
+    return execute_command(pgm);
+  }
+
 }
 
 
