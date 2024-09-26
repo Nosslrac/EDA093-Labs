@@ -17,7 +17,6 @@
  * All the best!
  */
 #include <assert.h>
-#include <errno.h>
 #include <ctype.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -37,8 +36,8 @@
 #include "parse.h"
 #include "ProgramState.h"
 
-static void print_cmd(Command *cmd);
-static void print_pgm(Pgm *p);
+//static void print_cmd(Command *cmd);
+//static void print_pgm(Pgm *p);
 
 
 int main(void)
@@ -181,103 +180,116 @@ int execute_command(Pgm* pgm)
 
 
 int handle_command(Command* cmd)
+{  
+  return setup_command_chain(cmd);
+}
+
+
+int setup_command_chain(Command* cmd)
 {
-  Pgm* pgm = cmd->pgm;
-  while(pgm != NULL){
-    if(!check_command(pgm)){
-      printf("lsh: %s: command not found\n", pgm->pgmlist[0]);
-      fflush(stdout);
-    }
-    pgm = pgm->next;
-  }
+  int size = (int)get_numberOfCommands(cmd);
+  int index = size;
+  // Safe guard
+  assert(size < 16);
   
-  // Terminal process fork
-  pid_t process = fork();
+  Pgm* pgm = cmd->pgm;
+  
+  int prevPipefd[2];
+  int newPipefd[2];
+  pid_t children[size];
+  
+  while(index > 0){
+    // Create new pipe
+    pipe(newPipefd);
+    //Fork shell process
+    pid_t process = fork();
+    
+    if(process == -1){
+      printf("Failed to fork\n");
+      exit(-1);
+    }
 
-  if(process == 0) 
-  {
-    //Non shell process
-    if(cmd->rstdout)
-    {
-      //Redirect output to file
-      int fileOut = open(cmd->rstdout, O_WRONLY | O_CREAT, S_IRWXU);
-      dup2(fileOut, STDOUT_FILENO);
-      close(fileOut);
-    }
-    if(cmd->rstdin)
-    {
-      // Input file content to command
-      int fileIn = open(cmd->rstdin, O_RDONLY, S_IRWXU);
-      dup2(fileIn, STDIN_FILENO);
-      close(fileIn);
-    }
-    size_t numCommands = get_numberOfCommands(cmd);
+    if(process == 0){
+      // Background processes will ignore SIGINT
+      childProc_setSig(cmd);
+      setInputOutput(cmd, index, size);
 
-    pid_t waitProcessFork = fork();
-    if(waitProcessFork == 0){
-      return fork_and_pipe(cmd->pgm, numCommands - 1, cmd->background);
+      //newPipe-> w|r **currCmd** w|r <-prevPipe
+      close(prevPipefd[0]); //Close read end - not used by this command
+      close(newPipefd[1]); //Close new write end - not used by this command
+      if(index > 1 && size != 1){
+        // process - should redirect sdtin to read end of pipe.
+        dup2(newPipefd[0], STDIN_FILENO);
+      }
+      if(index < size && size != 1){
+        // process - should redirect sdtin to read end of pipe.
+        dup2(prevPipefd[1], STDOUT_FILENO); //Redir stdout to write end of pipe
+      }
+      return execute_command(pgm);
     }
-    else{
-      waitpid(waitProcessFork, NULL, 0);
-      exit(0);
-    }
-    //return fork_and_pipe(cmd->pgm, numCommands - 1, cmd->background);
+    
+    // Close prev fds for shell process
+    close(prevPipefd[0]);
+    close(prevPipefd[1]);
+    prevPipefd[0] = newPipefd[0];
+    prevPipefd[1] = newPipefd[1];
+
+    pgm = pgm->next;
+    children[--index] = process;
   }
-  if(cmd->background == 0) 
-  {
-    //Shell process wait for forked child processes if it's not a background task
-    waitpid(process, NULL, 0);
+  // Close new fds for shell process
+  close(newPipefd[0]);
+  close(newPipefd[1]);
+  if(cmd->background == 0){
+    return wait_children(children, size);
   }
   return 0;
 }
 
-int fork_and_pipe(Pgm* pgm, size_t forks, int background)
+/*
+ * Wait for all child processes specified in children
+*/
+int wait_children(const pid_t* children, int size)
 {
-  if(background){
+  int retStatus = 0;
+  int status = 0;
+  for(int i = 0; i < size; i++){
+    pid_t cpid = children[i];
+    waitpid(cpid, &status, 0);
+    if(status != 0 && status != SIGINT){
+      printf("%s\n", strerror(status));
+      retStatus = status;
+    }
+  }
+  return retStatus;
+}
+
+void childProc_setSig(Command* cmd)
+{
+  if(cmd->background){
     signal(SIGINT, SIG_IGN);
   }
   else {
     signal(SIGINT, SIG_DFL);
   }
-  if(forks == 0){
-    //Recursion base case
-    return execute_command(pgm);
-  }
- 
-  //Create the pipe
-  int pipefd[2];
-  int success = pipe(pipefd);
-  if(success == -1)
-  {
-    printf("Couldn't create pipe\n");
-    return -1;
-  }
-
-  pid_t child = fork();
-  if(child == -1){
-    printf("Failed fork\n");
-    return -1;
-  }
-
-  if(child == 0)
-  {
-    //Child process will continue forking and connect to write end of pipe
-    close(pipefd[0]); //Close read end
-    dup2(pipefd[1], STDOUT_FILENO); //Redir stdout to write end of pipe
-    close(pipefd[1]); // Close old fd
-    return fork_and_pipe(pgm->next, forks-1, background);
-  }
-  else{
-    //Parent process - should redirect sdtin to read end of pipe.
-    close(pipefd[1]);
-    dup2(pipefd[0], STDIN_FILENO);
-    close(pipefd[0]);
-    waitpid(child, NULL, 0);
-    return execute_command(pgm);
-  }
-
 }
 
+void setInputOutput(Command* cmd, int index, int size)
+{
+  if(cmd->rstdout && index == size){
+    //Redirect output to file
+    int fileOut = open(cmd->rstdout, O_WRONLY | O_CREAT, S_IRWXU);
+    dup2(fileOut, STDOUT_FILENO);
+    close(fileOut);
+  }
+
+  if(index == 1 && cmd->rstdin){
+    // Input file content to command
+    int fileIn = open(cmd->rstdin, O_RDONLY, S_IRWXU);
+    dup2(fileIn, STDIN_FILENO);
+    close(fileIn);
+  }
+}
 
 size_t get_numberOfCommands(Command* cmd)
 {
@@ -293,7 +305,6 @@ size_t get_numberOfCommands(Command* cmd)
 
 int check_command(Pgm* pgm)
 {
-  //print_cmd(cmd);
   char* dupEnv = strdup(getenv("PATH"));
   char* startSearch = dupEnv;
   char* colon = NULL;
@@ -345,20 +356,7 @@ void exit_handler(Command* cmd)
  * and kill foreground child processes.
  */
 void handle_sigint()
-{
-  //printf("\n");
-  /*
-  if(pState.foregroundChild > 0){
-    pid_t deadChild = waitpid(pState.foregroundChild, NULL, WNOHANG);
-    if(deadChild == -1){
-      return;
-    }
-    assert(deadChild == 0 || deadChild == pState.foregroundChild);
-    kill(pState.foregroundChild, SIGKILL);
-    pState.foregroundChild = 0;
-  }
-  */
-}
+{}
 
 /*
  * Gracefully terminate child processes when shell exits
@@ -373,7 +371,7 @@ void child_exit()
  *
  * Helper function, no need to change. Might be useful to study as inspiration.
  */
- 
+/*
 static void print_cmd(Command *cmd_list)
 {
   printf("------------------------------\n");
@@ -385,13 +383,14 @@ static void print_cmd(Command *cmd_list)
   print_pgm(cmd_list->pgm);
   printf("------------------------------\n");
 }
+*/
 
 
 /* Print a (linked) list of Pgm:s.
  *
  * Helper function, no need to change. Might be useful to study as inpsiration.
  */
-
+/*
 static void print_pgm(Pgm *p)
 {
   if (p == NULL)
@@ -414,6 +413,7 @@ static void print_pgm(Pgm *p)
     printf("]\n");
   }
 }
+*/
 
 
 
