@@ -1,4 +1,26 @@
-Lab 1 
+# Lab 1: The zsh shell
+Lab group: 9 
+
+Members: Axel Carlsson, William Eriksson Kling, Zaid Haj Ibrahim
+
+## Meeting the specifications
+- EOF is handled by checking if the readline fucntion is empty / NULL when EOF signal is received.
+- Basic commands are launched using one of the ```exec``` family functions:
+```C
+execvp(pgm->pgmlist[0], pgm->pgmlist);
+```
+- To differentiate background and foreground tasks the shell will simply not wait for background tasks. To prevent background tasks from being canceled by Ctrl-C they simply ignore the ```SIGINT``` signal, while the foreground processes use the default handler.
+- Piping is done by forking the shell once for each command in the pipe. For each process the ```STDOUT_FILENO / STDIN_FILENO``` is redirected to the corresponding pipe.
+- IO redirection can be done for the first and last command in the pipe,  i.e. the first command can read from a file and the last command can output to a file. In the case of singular command, it can both read from file and output to file since it is both first and last.
+- **Builtins** For cd and exit, two helper functions were created to check if ```cd``` or ```exit``` is received from the user. If the first and only command is either of these they are handled accordingly. Exit command, terminates running child processes through ```killpg(0, SIGHUP)``` which will make child processes to exit gracefully, and then exits the shell. If command includes ```cd``` -> execute builtin command ```chdir``` to change directory. Sample shell shown below:
+
+![Alt text](figs/sampleShell.png)
+
+- To get the expected Ctrl-C behavior, a special ```SIGINT``` handler is registered for the shell process, which doesn't really do anything. As explained above, background processes ignore Ctrl-C and foreground processes use the default handler which stops the process.
+
+- To prevent zombie process the shell process has a ```SIGCHLD``` handler, which every time the state of a child process changes it will wait for finished child processes.
+
+- Our zsh implementation does **NOT** use any external shell or ```system``` call.
 
 Lab group: 9 
 
@@ -15,8 +37,15 @@ This is also where background execution was implemented. If the process is the p
 A function called forkAndPipe() is called when the child starts to handle the given command. It takes in both the struct for the command and the previous pipe, but also the number of forks that should be created. This is calculated by traversing and calculating the length of the pgm linked list from the command struct and subract one (do not need to create a pipe for last in the pipeline). If the process does not need to fork (either only one command or base case), simply execute the given command. If the process needs to fork, it will do so recursively while both execute a command given to a child and forward the result using. Forwarding is done by closing either the read or write end of its pipe and redirecting STD(OUT/IN)_FILENO using dup2().
 The process also handles signals SIGINT and SIGCHLD. If SIGINT is called (CTRL+C), the process closes all foreground processes. If SIGCHLD is called, the process terminates background processes after they have finished. Both signal handlers check waitpid using WNOHANG (without suspending the program).
 
+What challenges did you encounter for each specification? One of the biggest challenges was to simply understand and make use of functions, signals, inputs etc. from different used code libraries. These are what makes this lab possible, but it can sometimes be a bit of trial and error when trying to find a good solution to a problem
+
+**Feedback**
+The automatic test used for this lab looks to include tests that cover most of the requirements for having a working shell (in the capacity that is the lab). It was also a nice check to have during development, as you could use it as a sort of checklist or milestone checker that shows you have made progress. As the FAQ for this lab explain, it it also necessary to perform manual tests to catch potential issues not caught by the automatic test. One such test, the "grep apa | ls" from the same FAQ document, is a test that seems quite important. A suggestion is to either create a automatic test for this, or if not possible, highlight its importance in the README for the labs repository.
+
 ## Challenges
-An issue with our first implementation was that our shell only waits for the last child process in the pipe. Since the processes were created in a cascading fashion and we start our commands with ```execvp```, there is no resonable way of making the child processes wait for its children. This means that if the last command finishes the shell prompt will reappear but another process might still be using ```stdout```, leading to weird behavior in this case until Ctrl-C is pressed. For example, ```grep apa | ls``` would appear to finish, the prompt reappeared but new commands would display strange behavior if the shell even displayed the text you wrote. When you pressed Ctrl-C the normal behavior would resume, but this was generally very unintuitive behavior. To resolve this issue we realized that the way we created the processes, in cascading fashion, made it impossible to wait for all grandchild processes. Thus, we decided fork all processes from the shell process. However, forking all processes from the shell process made the setup of the pipes a lot uglier. Since all pipes are created in the shell process and one process might need two different pipes, one to read from and one to write to, we need two pipes available instead of one as in our recursive implementation.
+An issue with our first implementation, which passed all automatic tests, was that our shell only waits for the last child process in the pipe. Since the processes were created in a cascading fashion and we start our commands with ```execvp```, there is no resonable way of making the child processes wait for its children. This means that if the last command finishes the shell prompt will reappear but another process might still be using ```stdout```, leading to weird behavior in this case until Ctrl-C is pressed. For example, ```grep apa | ls``` would appear to finish, the prompt reappeared but new commands would display strange behavior if the shell even displayed the text you wrote. When you pressed Ctrl-C the normal behavior would resume, but this was generally very unintuitive behavior. To resolve this issue we realized that the way we created the processes, in cascading fashion, made it impossible for the shell process to wait for all grandchild processes. Thus, we decided fork all processes from the shell process. However, forking all processes from the shell process made the setup of the pipes a lot uglier and more difficult. Since all pipes are created in the shell process and one process might need two different pipes, one to read from and one to write to, we need two pipes available instead of one as in our recursive implementation.
 
 ## Feedback
 The automatic test used for this lab looks to include tests that cover most of the requirements for having a working shell (in the capacity that is the lab). It was also a nice check to have during development, as you could use it as a sort of checklist or milestone checker that shows you have made progress. As the FAQ for this lab explain, it it also necessary to perform manual tests to catch potential issues not caught by the automatic test. One such test, the "grep apa | ls" from the same FAQ document, is a test that seems quite important. A suggestion is to either create a automatic test for this, or if not possible, highlight its importance in the README for the labs repository.
+### Biggest problem
+- One of our biggest issues was that the pipe would hang even though everything was setup correctly, the reader started before the writer, thus the first command in the pipe would promptly finish but the second would wait forever. Through extensive debugging we realised this and discovered the issue. Since the pipes were created by the shell process they would stay open even though they were closed in child process. The reading process of the pipe would not receive EOF since some process might still write to the pipe (since it was open in shell process).
