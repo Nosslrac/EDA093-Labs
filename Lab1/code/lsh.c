@@ -226,8 +226,8 @@ int setup_command_chain(Command* cmd)
         dup2(prevPipefd[1], STDOUT_FILENO); //Redir stdout to write end of pipe
         
       }
-      close(newPipefd[0]);  // Close new read end
-      close(prevPipefd[1]); // Close prev write end
+      //close(newPipefd[0]);  // Close new read end
+      //close(prevPipefd[1]); // Close prev write end
       return execute_command(pgm);
     }
     // Close prev fds for shell process
@@ -258,7 +258,7 @@ int wait_children(const pid_t* children, int size)
   for(int i = 0; i < size; i++){
     pid_t cpid = children[i];
     waitpid(cpid, &status, 0);
-    if(status != 0){
+    if(status != 0 && status != SIGINT){
       printf("Task %d finished with code: %d\n", cpid, status);
       retStatus = status;
     }
