@@ -15,3 +15,7 @@ If a thread calls ```timer_sleep()``` then it will get blocked imediately and th
 
 ## Syncronization
 To prevent race conditions interrupts are disabled during the time when threads are being blocked and during the checks if a thread should be awoken.
+One important flaw to mention when using this method is the limit of threads that can run without creating a problem with consistent system tick. If going over threads takes too long, the call for ```timer_interrupt()``` during a tick might be missed.
+
+## Complexity
+Since the ```timer_interrupt()``` calls thread_foreach, the thread that calls for the interrupt traverses over all threads when checking for an opportunity to unblock. Because of this, the complexity should be linear in relation to the number of threads.
