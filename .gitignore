@@ -1,6 +1,9 @@
 # Created by https://www.toptal.com/developers/gitignore/api/c,ninja,cmake,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=c,ninja,cmake,python
 
+
+Lab2/pintos/
+
 ### C ###
 # Prerequisites
 *.d
