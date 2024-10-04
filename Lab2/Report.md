@@ -11,7 +11,7 @@ struct thread {
 }
 ```
 ## Algorithms
-If a thread calls ```timer_sleep()``` then it will get blocked imediately and then unblocked when the amount of time passed to ```timer_sleep()``` has passed. This is implemented by setting ```sleep_to_ticks``` when the thread is blocked. At each tick of the system we will iterate over all threads and check if the returned value by ```timer_ticks()``` is greater or equal to ```sleep_to_ticks``` for that thread. If that is the case the thread is unblocked. To prevent us from trying to unblock a already active/ready thread the thread status has to be ```THREAD_BLOCKED```. To ensure correct functionality of our implementation we added several ```ASSERT()```, to make sure that the behavior of the system is what we expect.
+If a thread calls ```timer_sleep()```, then it will get blocked immediately and later be unblocked when the specific amount of time passed to ```timer_sleep()``` has passed. This is implemented by setting ```sleep_to_ticks```, the time passed after the OS booted and time to sleep combined, when the thread is blocked. At each tick of the system, we will iterate over all threads using ```thread_foreach()```,, which is done with interrupts turned off. It checks if the time passed (which is checked using ```timer_ticks()```) is equal to or greater than ```sleep_to_ticks``` for a specific thread. The thread will be unblocked if that is the case. To prevent us from trying to unblock an already active or ready thread, the thread status has to be ```THREAD_BLOCKED```.
 
 The algorithm for unblocking threads looks like this (note that ```aux``` is not used but is required for the interface of ```thread_foreach()```):
 ```c
@@ -27,8 +27,8 @@ check_threads(struct thread* th, void *aux)
 }
 ```
 
-## Syncronization
-To prevent race conditions interrupts are disabled during the time when threads are being blocked and during the checks if a thread should be awoken.
+## Synchronization
+As mentioned for the algorithm, interrupts are temporarily disabled when calling ```thread_foreach``` during a ```timer_interrupt```. This is to avoid a race condition where the function called ```check_threads``` tests threads at the same time from different calls. 
 One important flaw to mention when using this method is the limit of threads that can run without creating a problem with consistent system tick. If going over threads takes too long, the call for ```timer_interrupt()``` during a tick might be missed.
 
 ## Complexity
