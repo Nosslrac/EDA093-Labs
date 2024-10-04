@@ -24,6 +24,9 @@ void timer_mdelay (int64_t milliseconds);
 void timer_udelay (int64_t microseconds);
 void timer_ndelay (int64_t nanoseconds);
 
+/*  Update thread status */
+void check_threads(struct thread* th, void *aux)
+
 void timer_print_stats (void);
 
 #endif /* devices/timer.h */
