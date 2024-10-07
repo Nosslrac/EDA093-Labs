@@ -29,6 +29,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+static void check_threads(struct thread* th, void* aux);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -169,7 +170,7 @@ timer_print_stats (void)
 {
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
+
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
@@ -183,8 +184,8 @@ timer_interrupt (struct intr_frame *args UNUSED)
 }
 
 /* Check if a blocked thread is ready to be unblocked */
-void
-check_threads(struct thread* th, void *aux)
+static void
+check_threads(struct thread* th, void* aux)
 {
   if(th->status == THREAD_BLOCKED && th->sleep_to_ticks <= timer_ticks())
   {
