@@ -89,11 +89,12 @@ timer_elapsed (int64_t then)
    be turned on. */
 void
 timer_sleep (int64_t ticks) 
-{
+{ 
   int64_t start = timer_ticks ();
 
   struct thread* th = thread_current();
   th->sleep_to_ticks = start + ticks;
+  th->sleep_status = SLEEPING;
   
   ASSERT(th->status != THREAD_BLOCKED);
   enum intr_level old_level = intr_disable();
@@ -187,9 +188,10 @@ timer_interrupt (struct intr_frame *args UNUSED)
 static void
 check_threads(struct thread* th, void* aux)
 {
-  if(th->status == THREAD_BLOCKED && th->sleep_to_ticks <= timer_ticks())
+  if(th->status == THREAD_BLOCKED && th->sleep_status == SLEEPING && th->sleep_to_ticks <= timer_ticks())
   {
     ASSERT(th->status == THREAD_BLOCKED);
+    th->sleep_status = AWAKE;
     thread_unblock(th);
   }
 }

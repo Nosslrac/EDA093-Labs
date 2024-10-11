@@ -14,6 +14,12 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
+enum sleep_status
+   {
+      AWAKE = 0,
+      SLEEPING = 1
+   };
+
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -88,7 +94,8 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int sleep_to_ticks;
+    int sleep_to_ticks;                 /* Sleep to this amount of ticks */
+    enum sleep_status sleep_status;     /* Sleep status, default 0 = AWAKE */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
