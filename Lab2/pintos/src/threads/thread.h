@@ -14,10 +14,11 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
+/* Threads sleep status */
 enum sleep_status
    {
-      AWAKE = 0,
-      SLEEPING = 1
+      AWAKE = 0,        /* Default for all non sleeping threads */
+      SLEEPING = 1      /* Sleep: set for the thread when timer_sleep is called */
    };
 
 /* Thread identifier type.

@@ -184,7 +184,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
   intr_set_level(old_level);
 }
 
-/* Check if a blocked thread is ready to be unblocked */
+/* Check if a sleeping thread is ready to be unblocked */
 static void
 check_threads(struct thread* th, void* aux)
 {
