@@ -7,11 +7,12 @@ Making a small modification to the thread structure to keep track of when a thre
 struct thread {
     ...
     int sleep_to_ticks;
+    enum sleep_status sleep_status;
     ...
 }
 ```
 ## Algorithms
-If a thread calls ```timer_sleep()```, then it will get blocked immediately and later be unblocked when the specific amount of time passed to ```timer_sleep()``` has passed. This is implemented by setting ```sleep_to_ticks```, the time passed after the OS booted and time to sleep combined, when the thread is blocked. At each tick of the system, we will iterate over all threads using ```thread_foreach()```,, which is done with interrupts turned off. It checks if the time passed (which is checked using ```timer_ticks()```) is equal to or greater than ```sleep_to_ticks``` for a specific thread. The thread will be unblocked if that is the case. To prevent us from trying to unblock an already active or ready thread, the thread status has to be ```THREAD_BLOCKED```.
+If a thread calls ```timer_sleep()```, then it will get blocked immediately and later be unblocked when the specific amount of time passed to ```timer_sleep()``` has passed. This is implemented by setting ```sleep_to_ticks```, the time passed after the OS booted and time to sleep combined, when the thread is blocked. At each tick of the system, we will iterate over all threads using ```thread_foreach()```,, which is done with interrupts turned off. It checks if the time passed (which is checked using ```timer_ticks()```) is equal to or greater than ```sleep_to_ticks``` for a specific thread. The thread will be unblocked if that is the case. To prevent us from trying to unblock an already active or ready thread, the thread status has to be ```THREAD_BLOCKED```. To prevent us from unblocking a thread that was blocked for other reasons e.g. using a semaphore, the sleep status of the thread has to be set to ```SLEEPING``` for us to unblock (see code snippet below).
 
 The algorithm for unblocking threads looks like this (note that ```aux``` is not used but is required for the interface of ```thread_foreach()```):
 ```c
@@ -19,7 +20,7 @@ The algorithm for unblocking threads looks like this (note that ```aux``` is not
 void
 check_threads(struct thread* th, void *aux)
 {
-  if(th->status == THREAD_BLOCKED && th->sleep_to_ticks <= timer_ticks())
+  if(th->status == THREAD_BLOCKED && th->sleep_status == SLEEPING && th->sleep_to_ticks <= timer_ticks())
   {
     ASSERT(th->status == THREAD_BLOCKED);
     thread_unblock(th);
