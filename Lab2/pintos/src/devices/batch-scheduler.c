@@ -227,7 +227,7 @@ void get_slot (const task_t *task) {
    * even if there are priority tasks of the other direction waiting
    */
   enum intr_level old_level = intr_disable();
-  struct list_elem* e = &task->task_elem;
+  struct list_elem* elem = &task->task_elem;
   lock_acquire(&scheduler.bus_lock);
   while(scheduler.in_transmission > 0){
     if(scheduler.in_transmission < BUS_CAPACITY) {
@@ -239,12 +239,13 @@ void get_slot (const task_t *task) {
       }
     }
    
-    list_push_back(&scheduler.waiting_tasks[task->direction], &task->task_elem);
+    list_push_back(&scheduler.waiting_tasks[task->direction], elem);
     list_sort(&scheduler.transfer_condition[task->direction].waiters, prio_compare, NULL);
     cond_wait(&scheduler.transfer_condition[task->direction], &scheduler.bus_lock);
-    list_remove(e);
+    list_remove(elem);
   }
   scheduler.in_transmission++;
+  ASSERT(scheduler.in_transmission <= BUS_CAPACITY);
   scheduler.bus_direction = task->direction;
 
   lock_release(&scheduler.bus_lock);
